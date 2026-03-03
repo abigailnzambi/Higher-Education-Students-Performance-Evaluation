@@ -1,0 +1,628 @@
+---
+title: "ALU Data Analyst Assessment"
+author: "Abigail Nzambi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# Setting the environment and loading all required libraries for data analysis
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+required_pkgs <- c("tidyverse", "lubridate", "ggplot2", 'kableExtra', "ggthemes", "broom")
+
+missing_pkgs <- required_pkgs[!required_pkgs %in% installed.packages()[,1]]
+if(length(missing_pkgs) > 0) install.packages(missing_pkgs)
+
+purrr::walk(required_pkgs, library, character.only = TRUE)
+rm(required_pkgs, missing_pkgs)
+```
+
+# Executive Summary
+
+This analysis uses the [Higher Education Students Performance Evaluation](https://www.kaggle.com/datasets/mariazhokhova/higher-education-students-performance-evaluation) from Kaggle, from the Faculty of Engineering and Faculty of Educational Sciences students in 2019. This data contains student-level information on demographics, family background, socioeconomic indicators, study behaviors, and academic outcomes.
+
+Although the dataset does not represent all African education systems, it provides a realistic view of student experiences and behaviors that are often missing from most real public data sets (e.g., World Bank, UNESCO). It was selected for its focus on individual students, making it especially relevant for an institution like ALU, where understanding engagement and learning behaviors is key to improving outcomes.
+
+The analysis explores the **demographic**, **socioeconomic**, and **behavioral** factors influencing academic success, structured around five questions that combine descriptive, diagnostic, and predictive approaches to generate actionable insights.
+
+---
+
+# Methodology
+
+## Data Source & Context
+
+The dataset comprises **145 student records** from a higher education institution, capturing individual-level information across 33 variables. Data was originally coded numerically and transformed into categorical factors for interpretability. The dataset includes:
+
+- **Demographic variables**: Age, gender, accommodation type, transportation mode
+- **Socioeconomic indicators**: Scholarship type, family income, parental education and occupation
+- **Academic behaviors**: Study hours, class attendance, reading habits, note-taking, exam preparation strategies
+- **Outcome measures**: Course grades (0-7 scale), which were transformed into performance categories
+
+## Data Preparation
+
+### 1. Data Cleaning & Feature Engineering
+- **Categorical transformation**: All 33 numeric variables were converted to meaningful categorical factors using the data dictionary provided on Kaggle
+- **Outcome variable creation**: Three outcome variables were derived from the original grade variable:
+  - `Grade_Numeric` (0-7): Continuous measure for correlation and regression analyses
+  - `Performance` (Low/Medium/High): Categorical grouping where High ≥ 5, Medium ≥ 3, Low < 3
+  - `Pass_Fail` (Pass/Fail): Binary indicator where Pass ≥ 3
+- **Missing value check**: No missing values were detected in the dataset
+
+### 2. Variable Organization
+Variables were grouped into four conceptual domains:
+- **Demographics** (10 variables): Personal characteristics and living situation
+- **Family Background** (6 variables): Parental education, occupation, and family structure
+- **Academic Behaviors** (17 variables): Study habits, engagement patterns, and learning strategies
+- **Course Identifiers**: Course enrollment information
+
+## Analytical Approach
+
+The analysis employs a multi-method approach combining descriptive, diagnostic, and predictive techniques:
+
+### Descriptive Analysis (Q1, Q2)
+- **Frequency distributions**: To understand population composition
+- **Cross-tabulations**: To examine relationships between categorical variables
+- **Summary statistics**: Mean grades, pass rates, and performance distributions by subgroup
+
+### Diagnostic Analysis (Q3, Q4)
+- **ANOVA (Analysis of Variance)**: To test whether mean grades differ significantly across study behavior categories
+- **Correlation analysis**: To quantify the strength and direction of relationships between ordinal variables and academic performance
+- **Effect size interpretation**: Using correlation coefficients where |r| < 0.3 indicates weak, 0.3-0.6 moderate, and > 0.6 strong associations
+
+### Predictive Analysis (Q4)
+- **Logistic regression**: To model the probability of passing as a function of multiple socioeconomic and behavioral predictors
+- **Model specification**: Binary outcome (Pass/Fail) predicted by 7 key variables: Study Hours, Class Attendance, Scholarship Level, Family Income, Work Status, Note-Taking, and Scientific Reading
+- **Interpretation framework**: 
+  - Odds Ratios (OR) > 1 indicate increased likelihood of passing
+  - 95% Confidence Intervals that exclude 1.0 suggest meaningful effects
+  - Statistical significance assessed at α = 0.05, though practical significance is also considered
+
+## Limitations
+
+1. **Sample size**: With 145 students, statistical power for detecting small effects is limited, particularly in subgroup analyses
+2. **Cross-sectional design**: The data represents a single point in time, preventing causal inference
+3. **Self-reported behaviors**: Study hours and reading habits may be subject to recall bias or social desirability
+4. **Context specificity**: Findings may not generalize beyond the institutional context from which data was collected
+5. **Model performance**: The logistic regression shows no statistically significant predictors at p < 0.05, indicating either weak effects, multicollinearity, or unmeasured confounders
+
+---
+
+```{r}
+# Loading the data set, and exploring the data 
+students <- read.csv("DATA.csv", sep=";")
+
+summary_stat <- summary(students)
+preview <- head(students, 10)
+```
+
+```{r}
+# Data cleaning and feature engineering
+#Transforming the raw, numerically coded data variables into categorical factors, grouped into Demographics, Family background, Academic behaviors and Course identifiers. 
+#These categorical values were provided on the Kaggle website, alongside the data
+
+students_clean <- students %>%
+  mutate(
+    # Personal Information (Variables 1-10)
+    Age_Group = factor(age, levels = 1:3, labels = c("18-21", "22-25", "26+")),
+    Gender = factor(sex, levels = 1:2, labels = c("Female", "Male")),
+    High_School = factor(graduated_h_school_type,levels = 1:3, labels = c("Private", "State", "Other")),
+    Scholarship = factor(scholarship_type, levels = 1:5, labels = c("None", "25%", "50%", "75%", "Full")),
+    Has_Work = factor(additional_work, levels = 1:2, labels = c("Yes", "No")),
+    Has_Activity = factor(activity, levels = 1:2,  labels = c("Yes", "No")), 
+    Has_Partner = factor(partner,  levels = 1:2, labels = c("Yes", "No")),
+    Salary_Level = factor(total_salary, levels = 1:5,labels = c("135-200", "201-270", "271-340", "341-410", "410+")),
+    Transportation = factor(transport,  levels = 1:4, labels = c("Bus", "Private Car/Taxi", "Bicycle", "Other")),
+    Accommodation = factor(accomodation,  levels = 1:4, labels = c("Rental", "Dormitory", "With Family", "Other")),
+   
+     # Family Background (Variables 11-16)
+    Mother_Education = factor(mother_ed, levels = 1:6, labels = c("Primary", "Secondary", "High School",  "University", "MSc", "PhD")),  
+    Father_Education = factor(farther_ed, levels = 1:6,labels = c("Primary", "Secondary", "High School",  "University", "MSc", "PhD")),
+    Num_Siblings = factor(siblings,levels = 1:5,labels = c("1", "2", "3", "4", "5+")),
+    Parental_Status = factor(parental_status, levels = 1:3,   labels = c("Married", "Divorced", "Deceased")),
+    Mother_Occupation = factor(mother_occup,levels = 1:6, labels = c("Retired", "Housewife", "Government", "Private Sector", "Self-Employed", "Other")),
+    Father_Occupation = factor(father_occup, levels = 1:5,labels = c("Retired", "Government", "Private Sector",  "Self-Employed", "Other")),
+    
+    # Academic Habits & Behavior (Variables 17-33)
+    Study_Hours = factor(weekly_study_hours,levels = 1:5, labels = c("None", "<5hrs", "6-10hrs", "11-20hrs", "20+hrs")),
+    Reading_NonScientific = factor(reading_non_scientific, levels = 1:3,  labels = c("None", "Sometimes", "Often")),
+    Reading_Scientific = factor(reading_scientific, levels = 1:3,  labels = c("None", "Sometimes", "Often")),
+    Attend_Seminars = factor(attendance_seminars_dep, levels = 1:2, labels = c("Yes", "No")),
+    Project_Impact = factor(impact_of_projects,   levels = 1:3, labels = c("Positive", "Negative", "Neutral")),
+    Class_Attendance = factor(attendances_classes,  levels = 1:3, labels = c("Always", "Sometimes", "Never")),
+    Exam_Prep_Company = factor(preparation_midterm_company, levels = 1:3, labels = c("Alone", "With Friends", "Not Applicable")),
+    Exam_Prep_Time = factor(preparation_midterm_time, levels = 1:3,labels = c("Before Exam", "Regularly", "Never")),
+    Note_Taking = factor(taking_notes,levels = 1:3, labels = c("Never", "Sometimes", "Always")),
+    Listening = factor(listenning, levels = 1:3,labels = c("Never", "Sometimes", "Always")),
+    Discussion_Interest = factor(discussion_improves_interest, levels = 1:3,labels = c("Never", "Sometimes", "Always")),
+    Flip_Classroom = factor(flip_classrom, levels = 1:3, labels = c("Not Useful", "Useful", "Not Applicable")),
+    Previous_GPA_Category = factor(grade_previous,  levels = 1:5, labels = c("<2.0", "2.0-2.49", "2.5-2.99","3.0-3.49", "3.5+")),
+    Expected_GPA_Category = factor(grade_expected, levels = 1:5, labels = c("<2.0", "2.0-2.49", "2.5-2.99",  "3.0-3.49", "3.5+")),
+    
+    # Course identifier
+    Course = factor(course_id))
+ 
+```
+
+
+```{r}
+ # Calculating three outcome variables: a numeric grade variable for continuous analysis, a categorical performance grouping, and a binary pass/fail indicator
+
+students_clean <- students_clean %>%
+  mutate(Grade_Numeric = grade,
+         Performance = case_when(grade >= 5 ~ "High", grade >= 3 ~ "Medium",TRUE ~ "Low") %>% 
+           factor(levels = c("Low", "Medium", "High")),
+         Pass_Fail = ifelse(grade >= 3, "Pass", "Fail") %>% 
+           factor(levels = c("Fail", "Pass"))) 
+```
+
+
+```{r}
+# Dropping original numeric columns, and retaining the factor-based variables
+  students_clean <- students_clean %>%
+  select(-c(age, sex, graduated_h_school_type, scholarship_type, additional_work,
+            activity, partner, total_salary, transport, accomodation,
+            mother_ed, farther_ed, siblings, parental_status, mother_occup, father_occup,
+            weekly_study_hours, reading_non_scientific, reading_scientific,
+            attendance_seminars_dep, impact_of_projects, attendances_classes,
+            preparation_midterm_company, preparation_midterm_time, taking_notes,
+            listenning, discussion_improves_interest, flip_classrom,
+            grade_previous, grade_expected, course_id, grade))
+```
+
+
+```{r}
+# checking for missing values
+missing_values <-students_clean %>%
+  filter(rowSums(is.na(.)) > 0)
+
+```
+
+```{r}
+# saving the clean data
+#write.csv(students_clean, "clean SE students data.csv", row.names = FALSE)
+```
+
+
+```{r}
+# A custom visualization theme
+graph_theme <- theme(
+  legend.position = "bottom",
+  legend.title = element_blank(),
+  axis.line.y = element_blank(),
+  axis.line.x = element_line(colour = "black", size = 0.5),
+  legend.text = element_text(family = "sans", size = rel(0.9)),
+  plot.caption = element_text(family = "sans", size = rel(1.0), vjust = -0.5),
+  plot.title = element_text(family = "sans", size = rel(1.4), hjust = 0.5, face = "bold"),
+  plot.subtitle = element_text(family = "sans", size = rel(1.1), hjust = 0.5),
+  axis.text = element_text(family = "sans", size = rel(1.0)),
+  axis.title = element_text(family = "sans", size = rel(1.0)),
+  strip.text.x = element_text(family = "sans", size = rel(1.2)),
+  panel.background = element_rect(fill = NA),
+  strip.background = element_rect(fill = NA, colour = "black"))
+
+# A custom color palette for visualizations
+pal <- scale_fill_manual(values = c( '#b20238', '#0A2F6E', '#316879', "#66AAD7", "#5DBCD2"))
+```
+
+
+# Q1: Demographic analysis and visualization
+## Question: What are the demographic characteristics of the student population?
+### Q1 a) Gender distribution
+```{r}
+
+gender <- students_clean %>%
+  select(Gender) %>%
+  group_by(Gender) %>%
+  summarise(Count = n()) %>%
+  mutate(Percentage = round(Count/sum(Count)*100, 2))
+
+# Frequency table
+kable_styling(kable(gender, col.names = c("Gender", "Count", "Percentage")),bootstrap_options = "striped",full_width = F)
+
+# Pie chart
+ggplot(gender, aes(x = "", y = Percentage, fill = Gender)) +
+  geom_col(width = 1, color = "white", size = 2) +
+  coord_polar(theta = "y") +
+  labs(title = "Distribution of students by gender") +
+  pal +
+  geom_text(aes(label = paste(Count, "\n(", Percentage, "%)", sep = "")),
+            position = position_stack(vjust = 0.5), size = 3, color = "white") +
+  theme_void() +
+  theme(plot.title = element_text(hjust = 0.5, size = 9))
+```
+
+
+**Gender Composition**: Males comprise 59.6% of the student body versus 40.4% females, representing a moderate gender imbalance. For an institution like ALU that values diversity, this gap would warrant attention. 
+
+
+### Q1 b) Age group distribution
+```{r}
+age_group <- students_clean %>%
+  select(Age_Group) %>%
+  group_by(Age_Group) %>%
+  summarise(Count = n()) %>%
+  mutate(Percentage = round(Count/sum(Count)*100, 2))
+
+# Frequency table
+kable_styling(kable(age_group, col.names = c("Age Group", "Count", "Percentage")),bootstrap_options = "striped", full_width = F)
+
+# Bar chart
+ggplot(age_group, aes(x = Age_Group, y = Percentage, fill = Age_Group)) +
+  geom_bar(stat = "identity", position = position_dodge(.9), width = 0.75) +
+  labs(title = "Distribution of students by age group",
+       x = "", y = "Percentage") +
+  graph_theme + pal+
+  geom_text(aes(label = paste(Count, "(", Percentage, "%)", sep = " ")),
+            position = position_dodge(.9),
+            vjust = -0.25, size = 3)
+```
+**Age Concentration & Implications**: The vast majority of students (93%) fall within traditional college age ranges—48% aged 18-21 and 45% aged 22-25. Only 7% are 26 or older. This narrow age distribution suggests that most students are progressing through higher education on a conventional timeline, which may indicate limited representation of non-traditional or returning students who might face different challenges.
+
+
+### Q1 c) Scholarship type distribution
+```{r}
+scholarship <- students_clean %>%
+  select(Scholarship) %>%
+  filter(!is.na(Scholarship)) %>%
+  group_by(Scholarship) %>%
+  summarise(Count = n()) %>%
+  mutate(Percentage = round(Count/sum(Count)*100, 2))
+
+# Frequency table
+kable_styling(kable(scholarship, col.names = c("Scholarship Type", "Count", "Percentage")),bootstrap_options = "striped", full_width = F)
+
+# Bar chart
+ggplot(scholarship, aes(x = reorder(Scholarship, Percentage), y = Percentage, fill = Scholarship)) +
+  geom_col(width = 0.85) +
+  coord_flip() +
+  labs(title = "Distribution of students by scholarship type",
+       x = "", y = "Percentage") +
+  graph_theme + pal +
+  geom_text(aes(label = paste(Count, "(", Percentage, "%)", sep = " ")),
+            hjust = -0.1, size = 4) +
+  ylim(0, max(scholarship$Percentage) * 1.1)
+```
+
+**Scholarship Distribution Reveals Access Challenges**: Scholarship allocation is widely distributed across all levels (None, 25%, 50%, 75%, Full), with no single category dominating. This suggests both that financial need varies considerably and that many students lack full funding support. Combined with the 66% employment rate, this indicates a students are likely to be exposed to economic stress, which could affect both academic performance and overall well-being.
+
+
+### Q1 d) Work status distribution
+```{r}
+work_status <- students_clean %>%
+  select(Has_Work) %>%
+  filter(!is.na(Has_Work)) %>%
+  group_by(Has_Work) %>%
+  summarise(Count = n()) %>%
+  mutate(Percentage = round(Count/sum(Count)*100, 2))
+
+# Frequency table
+kable_styling(kable(work_status, col.names = c("Has Work", "Count", "Percentage")),bootstrap_options = "striped",full_width = F)
+
+# Bar chart
+ggplot(work_status, aes(x = reorder(Has_Work, -Percentage), y = Percentage, fill = Has_Work )) +
+  geom_bar(stat = "identity", position = position_dodge(.9), width = 0.75) +
+  labs(title = "Distribution of students by work status",
+       x = "", y = "Percentage") +
+  graph_theme + pal+
+  geom_text(aes(label = paste(Count, "(", Percentage, "%)", sep = " ")),
+            position = position_dodge(.9),
+            vjust = -0.25, size = 3)
+
+```
+**Financial Constraints are Prevalent**: Two-thirds (33%) of students work while studying, indicating significant financial pressure. This dual responsibility may compete with time for coursework, study groups, and extracurricular engagement—factors later shown to influence academic performance. The high employment rate suggests that purely academic support may be insufficient; students may also need flexible scheduling or financial aid to reduce work hours.
+
+
+**Key Insights: Student Demographics**
+The student population demonstrates several characteristics that may influence academic engagement and outcomes:
+**Strategic Implications**: These demographics highlight the importance of holistic support systems. Academic interventions should account for time-strapped, financially constrained students. Policies that offer flexible learning options, enhanced financial aid, or part-time work-study programs integrated with academic goals may yield better engagement and retention than purely academical improvements.
+
+
+
+# Q2: Socioeconomic factors & academic performance
+## Question: How do socioeconomic factors relate to student academic performance?
+### Q2 a) Scholarship level vs performance 
+```{r}
+scholarship_performance <- students_clean %>%
+  group_by(Scholarship) %>%
+  summarise(
+    Count = n(),
+    Mean_Grade = round(mean(Grade_Numeric), 2),
+    Pass_Rate = round(mean(Pass_Fail == "Pass") * 100, 2)) %>%
+  arrange(desc(Mean_Grade))
+
+# Distribution table
+kable_styling(kable(scholarship_performance, col.names = c("Scholarship Type", "Count", "Mean Grade", "Pass Rate (%)")),bootstrap_options = "striped", full_width = F)
+
+# Bar chart
+ggplot(scholarship_performance, aes(x = reorder(Scholarship, -Mean_Grade), y = Mean_Grade)) +
+  geom_bar(stat = "identity", position = position_dodge(.9), width = 0.75, fill = "#0A2F6E") +
+  labs(title = "Mean Grade by Scholarship Level",
+       x = "Scholarship Type",
+       y = "Mean Grade") +
+  graph_theme +
+  geom_text(aes(label = paste(Count, "students\n", Mean_Grade, "avg")),
+            vjust = -0.25, size = 3) +
+  theme(axis.text.x = element_text(angle = 0, hjust = 1))
+ 
+```
+
+
+**The Scholarship effect**: Students receiving 75% scholarships achieve the highest academic outcomes across all funding levels—mean grade of 4.10 and 66.7% pass rate—outperforming even fully funded students (mean 2.65, 43.5% pass rate). This 1.45-point grade difference is substantial and suggests that partial financial support may create stronger academic motivation than full funding. Possible explanations include:
+ -Students covering 25% of costs may feel greater ownership and accountability
+ -75% scholarship recipients may represent a specific merit-achievement balance that correlates with academic drive
+ -Students managing partial funding may develop better time management and prioritization skills
+The poor performance of fully funded students (mean grade 2.65) compared to partial scholarship holders suggests that **financial support alone is insufficient**. Full scholarship students may:
+- Lack the intrinsic motivation that drove partial scholarship recipients to compete for funding
+- Feel less pressure to maintain academic standards if renewal requirements are weak
+- Come from backgrounds with weaker academic preparation, where a full scholarship compensated for lower qualifications
+
+
+
+### Q2 b) Family income vs performance
+```{r}
+salary_performance <- students_clean %>%
+  filter(!is.na(Salary_Level)) %>%
+  group_by(Salary_Level) %>%
+  summarise(
+    Count = n(),
+    Mean_Grade = round(mean(Grade_Numeric), 2),
+    Pass_Rate = round(mean(Pass_Fail == "Pass") * 100, 2)) %>%
+  arrange(desc(Mean_Grade))
+
+# Distribution table
+kable_styling(kable(salary_performance, col.names = c("Income Level (USD)", "Count", "Mean Grade",  "Pass Rate (%)")),bootstrap_options = "striped",full_width = F)
+
+
+# Bar chart
+ggplot(salary_performance, aes(x = reorder(Salary_Level, -Mean_Grade), y = Mean_Grade, fill = '#0A2F6E')) +
+  geom_col(width = 0.75) +
+  geom_text(aes(label = paste(Count, "students\n", Mean_Grade, "avg")), 
+            vjust = -0.25, size = 3.5) +
+  labs(title = "Mean Grade by Family Income Level",
+       x = "Monthly Income (USD)",
+       y = "Mean Grade (0-7)") +
+  graph_theme + pal +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none") +
+  ylim(0, max(salary_performance$Mean_Grade) * 1.15)
+
+
+```
+
+**Income and Performance effect**: The strongest performers come from the lowest income bracket (USD 135-200), achieving a mean grade of 3.51 and 61.3% pass rate. As family income rises, performance declines—students from households earning USD 341-410 average just 2.0 with pass rates below 50%. This inverse relationship challenges the assumption that more resources automatically improve outcomes.
+
+This pattern likely reflects confounding variables rather than a causal relationship. Students from lower-income backgrounds who gain university admission may represent a more academically selected group (having overcome significant barriers), while higher-income students may face fewer consequences for underperformance or have access to university regardless of academic preparedness. Alternatively, wealthier students may face fewer immediate pressures to succeed academically if family connections or resources provide alternative pathways.
+
+
+
+**Key Insights: Socioeconomic Factors and Academic Performance**
+The relationship between financial support and academic performance reveals a **non-linear pattern** that challenges usual assumptions about funding and student success.
+
+**Strategic Implications**:
+1. **Reconsider full-ride scholarship structures**: Consider performance-based renewal requirements or pairing financial aid
+3. **Support beyond funding**: Students at all income levels need academic advising, study skills workshops, and mentorship—especially fully funded students who show the weakest outcomes
+4. **Investigate confounding factors**: Further analysis should examine whether scholarship recipients differ in academic preparedness, motivation, or support systems before attributing causality to funding levels alone
+
+
+
+
+# Q3: Study behaviors & academic success
+## Question: How do study behaviors relate to academic success?
+### Weekly study hours vs performance
+```{r}
+study_hours_performance <- students_clean %>%
+  group_by(Study_Hours) %>%
+  summarise(
+    Count = n(),
+    Mean_Grade = round(mean(Grade_Numeric), 2),
+    Pass_Rate = round(mean(Pass_Fail == "Pass") * 100, 2),
+    High_Performers = round(mean(Performance == "High") * 100, 2)) %>%
+  arrange(desc(Mean_Grade))
+
+# Table
+kable_styling(kable(study_hours_performance, col.names = c("Study Hours", "Count", "Mean Grade",  "Pass Rate (%)", "High Performers (%)")),bootstrap_options = "striped", full_width = F)
+
+# Statistical test
+study_hours_anova <- aov(Grade_Numeric ~ Study_Hours, data = students_clean)
+study_hours_pvalue <- summary(study_hours_anova)[[1]]$`Pr(>F)`[1]
+
+# Correlation (treat as ordinal)
+study_hours_cor <- cor.test(as.numeric(students_clean$Study_Hours), 
+                            students_clean$Grade_Numeric)
+
+print(paste("Study Hours Correlation:", round(study_hours_cor$estimate, 3), 
+            "p-value:", round(study_hours_cor$p.value, 4)))
+```
+
+
+**Study Hours**: Academic performance follows a clear pattern with respect to study time. Students studying **6-10 hours per week** achieve the highest mean grade (3.50), followed closely by those studying under 5 hours (3.34). As expected, Students reporting **no study time** achieve a mean grade of 2.90 and only 44.8% pass—predictably poor outcomes, while Students studying **20+ hours per week** record the *lowest* mean grade (2.0) among all groups who study, with *zero* high performers
+
+This finding reveals **diminishing and even negative returns** to excessive study time. The correlation between study hours and grades, while positive (r ≈ 0.08-0.10), is extremely weak and statistically marginal (p ≈ 0.09). Possible explanations for why extreme studying backfires include:
+- **Inefficient strategies**: Students cramming 20+ hours may lack effective techniques (active recall, spaced repetition), resulting in "busywork" rather than learning
+- **Burnout and cognitive overload**: Excessive hours can lead to diminishing attention, retention, and motivation
+- **Struggling students overcompensating**: Weaker students may study longer *because* they are struggling, not the other way around (reverse causality)
+- **Time displacement**: Excessive studying may crowd out sleep, exercise, social connections, and other factors that support cognitive performance
+
+
+
+### Class attendance vs performance
+```{r}
+attendance_performance <- students_clean %>%
+  group_by(Class_Attendance) %>%
+  summarise(
+    Count = n(),
+    Mean_Grade = round(mean(Grade_Numeric), 2),
+    Pass_Rate = round(mean(Pass_Fail == "Pass") * 100, 2),
+    High_Performers = round(mean(Performance == "High") * 100, 2)) %>%
+  arrange(desc(Mean_Grade))
+
+# Table
+kable_styling(kable(attendance_performance, col.names = c("Class Attendance", "Count", "Mean Grade",  "Pass Rate (%)", "High Performers (%)")),bootstrap_options = "striped",full_width = F)
+
+# Statistical test
+attendance_anova <- aov(Grade_Numeric ~ Class_Attendance, data = students_clean)
+attendance_pvalue <- summary(attendance_anova)[[1]]$`Pr(>F)`[1]
+
+# Correlation
+attendance_cor <- cor.test(as.numeric(students_clean$Class_Attendance), 
+                           students_clean$Grade_Numeric)
+
+print(paste("Class Attendance Correlation:", round(attendance_cor$estimate, 3), 
+            "p-value:", round(attendance_cor$p.value, 4)))
+```
+
+
+**Class Attendance: Consistent Returns**: Unlike study hours, class attendance shows an expected relationship with performance. Students who **always attend** achieve:
+- Mean grade: 3.40 (vs. 2.69 for "sometimes" and 2.50 for "never")
+- Pass rate: 59.1% (vs. 37.1% for "sometimes")
+- 29.5% reach high performance (vs. 14.3% for "sometimes")
+
+The correlation is positive (r ≈ 0.15, p ≈ 0.09), indicating that attendance contributes meaningfully to success. This suggests that **structured, instructor-led learning time** is more reliable than self-directed study.
+
+**Interpreting the Attendance Advantage**: Regular class attendance likely operates through multiple mechanisms:
+- **Information access**: Students get direct explanations, examples, and clarifications that may be absent from textbooks
+- **Accountability and routine**: Consistent attendance creates a study habit and reduces procrastination
+- **Social learning**: Interaction with peers and instructors can reinforce concepts and provide alternative perspectives
+- **Signal of engagement**: Students who attend regularly may also take notes, ask questions, and engage more deeply overall
+
+**Why Attendance Matters More Than Study Hours**: The weak correlation of study hours (r ≈ 0.08) versus the stronger effect of attendance (r ≈ 0.15) suggests that **passive time investment is insufficient**. Effective learning requires active engagement, and classroom participation provides structure that self-study often lacks. Students studying 20+ hours independently may be practicing poorly, while students attending class benefit from expert-guided learning regardless of additional study time.
+
+
+
+
+**Key Insights: Study Behaviors and Academic Success**
+The analysis reveals a critical distinction: **study quality and consistency matter far more than quantity alone**. Two patterns emerge that challenge common assumptions about effective learning.
+
+**Strategic Implications**:
+1. **De-emphasize study time**: Telling students to "study more" may backfire. Instead, focus on study *quality*—active learning techniques, spaced repetition, and practice testing
+2. **Incentivize attendance**: Implement participation grades, attendance tracking, or in-class activities that reward regular engagement
+3. **Support struggling students differently**: Students studying 20+ hours are likely struggling and need targeted interventions (tutoring, study skills coaching) rather than encouragement to work harder
+4. **Promote balanced approaches**: Communicate that 6-10 hours of focused, strategic study—combined with consistent attendance—is more effective than marathon study sessions
+5. **Monitor at-risk students**: Students reporting no study time or inconsistent attendance should trigger early alerts for academic support
+
+The evidence strongly suggests that **consistent, structured engagement** (showing up to class, taking notes, participating) is a more reliable predictor of success than raw hours spent studying. Interventions should prioritize helping students develop effective study habits and maintain regular engagement, rather than simply increasing time on task.
+
+
+
+# Q4: Diagnostic / predictive analysis
+## Question: Which socioeconomic and study-related factors most strongly influence a student's likelihood of passing a course?
+```{r}
+q4_data <- students_clean %>%
+  select(Pass_Fail, Study_Hours, Class_Attendance, Scholarship, Salary_Level, Has_Work, Note_Taking, Reading_Scientific) %>%
+  na.omit()
+
+```
+
+
+```{r}
+pass_model <- glm( Pass_Fail ~ Study_Hours + Class_Attendance + Scholarship + Salary_Level + Has_Work + Note_Taking + Reading_Scientific,
+  data = q4_data, family = binomial)
+
+model_results <- broom::tidy(pass_model, exponentiate = TRUE, conf.int = TRUE) %>%
+  filter(term != "(Intercept)") %>%
+  arrange(desc(estimate))
+
+
+kable_styling( kable(model_results %>%
+      select(term, estimate, conf.low, conf.high, p.value), 
+      col.names = c("Predictor", "Odds Ratio", "Lower CI", "Upper CI", "p-value"),
+    digits = 3), bootstrap_options = "striped", full_width = FALSE)
+
+```
+
+```{r}
+# Model diagnostics
+model_summary <- summary(pass_model)
+pseudo_r2 <- 1 - (pass_model$deviance / pass_model$null.deviance)
+aic_value <- AIC(pass_model)
+
+print(paste("McFadden's Pseudo R²:", round(pseudo_r2, 3)))
+print(paste("AIC:", round(aic_value, 2)))
+```
+
+
+**Key Insights: Predictive Analysis of Passing Likelihood**
+
+The logistic regression model provides insights into factors associated with passing, although there is limited **statistical significance** (no predictors reach p < 0.05 significance). The model's **McFadden's Pseudo R² is low :0.147**, indicating that these variables explain only a modest portion of variance in passing outcomes. This suggests either weak individual effects, multicollinearity among predictors, or important unmeasured factors (prior preparation, motivation, instructor quality).
+
+Despite these limitations, **effect sizes point to meaningful patterns** that align with and extend the earlier descriptive findings.
+
+**Behavioral Factors Dominate Over Demographics**:
+
+1. **Note-Taking: The Strongest Predictor** (OR ≈ 2.8–3.2, though not statistically significant)
+   - Students who "always" take notes have nearly **3× the odds of passing** compared to those who "never" take notes,showing that active encoding (writing, summarizing) enhances retention
+   - Even "sometimes" taking notes shows elevated odds, suggesting that *any* note-taking is better than none
+   - **Implication**: Equiping students with note-taking strategies could be a high-impact, low-cost intervention
+
+2. **Scientific Reading: Modest Positive Effect** (OR ≈ 2.0 for "often" vs. "none")
+   - Frequent reading of scientific materials is associated with roughly **2× higher odds of passing**
+   - This likely reflects both cause and effect: engaged students read more, and reading itself builds comprehension and domain knowledge
+   - The effect persists even after controlling for study hours, suggesting reading quality matters independently
+   - **Implication**: Assigning structured reading with comprehension checks may improve outcomes beyond unguided study time
+
+3. **Class Attendance Remains Critical** (OR ≈ 0.4 for "sometimes" vs. "always")
+   - Students attending "sometimes" have approximately **60% lower odds** of passing compared to "always" attenders
+   - This reinforces the descriptive finding that consistent attendance is a key success factor
+   - **Implication**: Attendance policies should be enforced, and interventions should target students whose attendance begins to slip
+
+**Socioeconomic Factors Show Weaker, Mixed Effects**:
+
+4. **Study Hours: No Clear Benefit at High Levels** (OR ≈ 1.0 for 20+ hours)
+   - Studying 20+ hours shows virtually no advantage over baseline, confirming the earlier finding of diminishing or negative returns
+   - The 6-10 hour category shows the highest odds ratios, though still not significant
+   - **Implication**: Quality over quantity—students should focus on efficient study methods rather than marathon sessions
+
+5. **Scholarship and Income: Directional but Inconclusive**
+   - The model does not reveal statistically significant effects for scholarship or income levels
+   - This may reflect the complex, non-linear relationship observed in Q2 where 75% scholarship showed optimal success, compared to full scholarship.
+   - **Implication**: Financial aid alone is insufficient; support must be paired with academic engagement strategies
+
+6. **Work Status: Minimal Impact** (OR ≈ 1.0)
+   - Having additional work shows virtually no effect in this model, though 66% of students work
+   - This could mean either (a) working students adapt successfully, or (b) the effect is masked by other factors
+   - **Implication**: Flexible scheduling and work-study integration may mitigate potential negative effects of employment
+
+**Model Limitations and Cautions**:
+
+- **Low explanatory power**: The pseudo R² suggests these factors explain < 10% of variation in passing. Unmeasured variables (motivation, prior knowledge, instructor effectiveness, peer support) likely play major roles
+- **No statistical significance**: All p-values exceed 0.05, meaning we cannot reject the null hypothesis that these predictors have no effect. Effect sizes should be interpreted as exploratory rather than confirmatory
+- **Multicollinearity concerns**: Variables like study hours, attendance, and note-taking may be intercorrelated, making it difficult to isolate individual effects
+- **Sample size**: With 145 students and 7 predictors, power is limited for detecting small effects
+
+
+**Strategic Implications**:
+
+1. **Focus on High-Impact Behaviors**: The model suggests that encouraging **consistent attendance** and **active note-taking** may yield better returns than simply increasing study time. These are concrete, teachable behaviors that an education organisation can reinforce through policy.
+
+2. **Teach Study Skills Explicitly**: Since note-taking and scientific reading show the largest effect sizes, an education organisation should integrate explicit instruction in:
+   - Effective note-taking methods
+   - Active reading strategies (annotating, summarizing, questioning)
+   - Evidence-based study techniques
+
+3. **Early Intervention Systems**: Use attendance tracking and engagement metrics to identify at-risk students early. Students who miss classes or disengage should receive outreach before they fall behind
+
+4. **Holistic Support Beyond Academics**: The model's weak explanatory power suggests that academic factors alone do not determine success. Psychosocial support, mental health resources, financial advising, and community-building may be equally important
+
+5. **Further Research Needed**: To improve prediction, an education organisation should collect data on additional variables such as:
+   - Prior academic preparation (high school GPA, entrance exam scores)
+   - Motivation and goal clarity
+   - Peer network quality and study group participation
+   - Instructor effectiveness and course design
+   - Mental health and well-being indicators
+
+**Overall Interpretation**: The predictive analysis reinforces that **how students engage** (attendance, note-taking, active reading) matters more than **how much time they invest** (study hours). However, the model's limited explanatory power highlights that student success is multifactorial—driven by preparation, motivation, teaching quality, and support systems as much as by measurable behaviors. Effective interventions must therefore be holistic, addressing both academic skills and the broader ecosystem that enables student success.
+
+---
+
+# Conclusion
+
+This analysis of 145 students reveals that **academic success is more strongly associated with the quality and consistency of engagement than with the quantity of resources or effort**. Three key findings emerge:
+
+1. **Financial support alone is insufficient**: Students on 75% scholarships outperform fully funded peers, and lower-income students achieve better outcomes than wealthier ones. This paradox suggests that motivation, accountability, and academic preparedness—not just money—drive success.
+
+2. **Study quality trumps quantity**: Moderate, focused study (6-10 hours/week) outperforms both minimal and excessive studying (20+ hours). The strongest predictors are active behaviors like note-taking and consistent class attendance, not passive time investment.
+
+3. **Behavioral interventions may outperform resource-based ones**: The logistic regression, though statistically weak, suggests that teaching effective study habits (note-taking, active reading) and enforcing attendance may yield higher returns than increasing financial aid or encouraging more study hours.
+
+For institutions like ALU, these findings underscore the importance of **holistic student support** that combines financial access, academic skill-building, behavioral nudges, and engagement systems. Success requires not just admitting students and funding them, but actively cultivating the habits and structures that enable learning.
